@@ -1,3 +1,4 @@
+import requests
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -26,15 +27,30 @@ def create_pr(incident_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Patch is not verified yet. Cannot create PR.")
 
     branch_name = f"fix/{incident.incident_id.lower()}"
-    create_branch(branch_name)
+    if not analysis_result.get("affected_files"):
+        raise HTTPException(status_code=422, detail="Analysis did not return any affected files to patch.")
 
     affected_file = analysis_result["affected_files"][0]
-    commit_file(
-        branch_name=branch_name,
-        file_path=affected_file,
-        file_content=analysis_result["patch"],
-        commit_message=f"fix: resolve {incident.incident_id} - {analysis_result['root_cause']}",
-    )
+
+    try:
+        create_branch(branch_name)
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 422:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Branch '{branch_name}' may already exist. Try a different incident or delete the existing branch.",
+            )
+        raise HTTPException(status_code=502, detail=f"GitHub branch creation failed: {str(e)}")
+
+    try:
+        commit_file(
+            branch_name=branch_name,
+            file_path=affected_file,
+            file_content=analysis_result["patch"],
+            commit_message=f"fix: resolve {incident.incident_id} - {analysis_result['root_cause']}",
+        )
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"GitHub commit failed: {str(e)}")
 
     pr_title = f"Fix for {incident.incident_id}: {analysis_result['root_cause']}"
     pr_body = f"""## Root Cause
@@ -62,7 +78,10 @@ def create_pr(incident_id: str, db: Session = Depends(get_db)):
 Revert this PR to roll back the change.
 """
 
-    pr_result = create_pull_request(branch_name, pr_title, pr_body)
+    try:
+        pr_result = create_pull_request(branch_name, pr_title, pr_body)
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"GitHub PR creation failed: {str(e)}")
 
     incident.status = "pr_created"
     db.commit()
