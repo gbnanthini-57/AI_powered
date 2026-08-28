@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from backend.app.api import health, logs, incidents, analysis, verification, github
 
 app = FastAPI()
@@ -11,6 +12,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"An unexpected error occurred: {str(exc)}"},
+    )
+
 
 app.include_router(health.router)
 app.include_router(logs.router)
