@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.db.database import get_db
 from backend.app.models.incident import Incident
+from backend.app.services.blast_radius_service import calculate_blast_radius
 
 router = APIRouter()
 
@@ -34,6 +35,8 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)):
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
+    risk_result = calculate_blast_radius(incident)
+
     return {
         "incident_id": incident.incident_id,
         "error": {
@@ -46,6 +49,6 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)):
         },
         "analysis": None,
         "verification": None,
-        "risk": None,
+        "risk": risk_result,
         "pull_request": None,
     }
